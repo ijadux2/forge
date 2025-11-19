@@ -1,0 +1,467 @@
+#!/bin/bash
+
+# fedora-home-manager - A home-manager like script for Fedora
+# Provides dotfile management and package installation functionality
+
+set -euo pipefail
+
+# Configuration
+HOME_MANAGER_DIR="${HOME_MANAGER_DIR:-$HOME/.config/fedora-home-manager}"
+DOTFILES_DIR="$HOME_MANAGER_DIR/dotfiles"
+PACKAGES_FILE="$HOME_MANAGER_DIR/packages.txt"
+STATE_FILE="$HOME_MANAGER_DIR/state.json"
+BACKUP_DIR="$HOME_MANAGER_DIR/backup"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging functions
+log_info() {
+  echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+  echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+  echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+  echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Initialize command - set up the configuration structure
+init() {
+  log_info "Initializing fedora-home-manager..."
+  
+  # Create directories
+  mkdir -p "$HOME_MANAGER_DIR"
+  mkdir -p "$DOTFILES_DIR"
+  mkdir -p "$BACKUP_DIR"
+
+  # Create initial state file if it doesn't exist
+  if [[ ! -f "$STATE_FILE" ]]; then
+    echo '{"version": "1.0", "last_switch": null, "managed_files": []}' >"$STATE_FILE"
+    log_success "Created state file: $STATE_FILE"
+  fi
+
+  # Create initial packages file with example content if it doesn't exist
+  if [[ ! -f "$PACKAGES_FILE" ]]; then
+    cat >"$PACKAGES_FILE" <<'EOF'
+# Fedora packages to install
+# One package per line
+# Lines starting with # are comments
+# Example:
+# git
+# vim
+# curl
+# wget
+EOF
+    log_success "Created packages file: $PACKAGES_FILE"
+  fi
+
+  # Create example dotfiles structure
+  if [[ ! -f "$DOTFILES_DIR/.gitkeep" ]]; then
+    touch "$DOTFILES_DIR/.gitkeep"
+    log_info "Created dotfiles directory: $DOTFILES_DIR"
+  fi
+
+  log_success "Initialization complete!"
+  log_info "Add packages to $PACKAGES_FILE and dotfiles to $DOTFILES_DIR/"
+  log_info "Run 'fedora-home-manager switch' to apply your configuration"
+}
+
+# Initialize directories
+init_dirs() {
+  mkdir -p "$HOME_MANAGER_DIR"
+  mkdir -p "$DOTFILES_DIR"
+  mkdir -p "$BACKUP_DIR"
+
+  # Create initial state file if it doesn't exist
+  if [[ ! -f "$STATE_FILE" ]]; then
+    echo '{"version": "1.0", "last_switch": null, "managed_files": []}' >"$STATE_FILE"
+  fi
+
+  # Create initial packages file if it doesn't exist
+  if [[ ! -f "$PACKAGES_FILE" ]]; then
+    touch "$PACKAGES_FILE"
+  fi
+}
+
+# Backup existing files
+backup_file() {
+  local file="$1"
+  local backup_path="$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d_%H%M%S).bak"
+
+  if [[ -f "$file" ]]; then
+    cp "$file" "$backup_path"
+    log_info "Backed up $file to $backup_path"
+  fi
+}
+
+# Restore files from backup
+restore_backup() {
+  local file="$1"
+  local latest_backup=$(ls -t "$BACKUP_DIR"/$(basename "$file")*.bak 2>/dev/null | head -1)
+
+  if [[ -n "$latest_backup" ]]; then
+    cp "$latest_backup" "$file"
+    log_success "Restored $file from backup"
+    return 0
+  else
+    log_warning "No backup found for $file"
+    return 1
+  fi
+}
+
+# Install packages using dnf
+install_packages() {
+  if [[ ! -f "$PACKAGES_FILE" ]] || [[ ! -s "$PACKAGES_FILE" ]]; then
+    log_info "No packages to install"
+    return 0
+  fi
+
+  log_info "Installing packages..."
+
+  local current_packages=()
+  
+  # Read packages and install them
+  while IFS= read -r package; do
+    # Skip empty lines and comments
+    [[ -z "$package" || "$package" == \#* ]] && continue
+
+    current_packages+=("$package")
+    
+    log_info "Installing package: $package"
+    if sudo dnf install -y "$package"; then
+      log_success "Installed $package"
+    else
+      log_error "Failed to install $package"
+    fi
+  done <"$PACKAGES_FILE"
+
+  # Update state with current packages
+  update_installed_packages "${current_packages[@]}"
+}
+
+# Uninstall packages that are no longer in packages.txt
+cleanup_packages() {
+  log_info "Cleaning up packages that are no longer needed..."
+
+  # Get current packages from packages.txt
+  local current_packages=()
+  if [[ -f "$PACKAGES_FILE" ]]; then
+    while IFS= read -r package; do
+      [[ -z "$package" || "$package" == \#* ]] && continue
+      current_packages+=("$package")
+    done <"$PACKAGES_FILE"
+  fi
+
+  # Get previously installed packages from state
+  local previous_packages=()
+  while IFS= read -r package; do
+    [[ -n "$package" ]] && previous_packages+=("$package")
+  done < <(get_installed_packages)
+
+  # Find packages to uninstall (in previous but not in current)
+  local packages_to_uninstall=()
+  for prev_pkg in "${previous_packages[@]}"; do
+    local found=false
+    for curr_pkg in "${current_packages[@]}"; do
+      if [[ "$prev_pkg" == "$curr_pkg" ]]; then
+        found=true
+        break
+      fi
+    done
+    if [[ "$found" == false ]]; then
+      packages_to_uninstall+=("$prev_pkg")
+    fi
+  done
+
+  # Uninstall packages that are no longer needed
+  if [[ ${#packages_to_uninstall[@]} -gt 0 ]]; then
+    log_info "Uninstalling ${#packages_to_uninstall[@]} packages that are no longer needed..."
+    for package in "${packages_to_uninstall[@]}"; do
+      log_info "Uninstalling package: $package"
+      if sudo dnf remove -y "$package"; then
+        log_success "Uninstalled $package"
+      else
+        log_error "Failed to uninstall $package"
+      fi
+    done
+  else
+    log_info "No packages to uninstall"
+  fi
+}
+
+# Deploy dotfiles
+deploy_dotfiles() {
+  if [[ ! -d "$DOTFILES_DIR" ]] || [[ -z "$(ls -A "$DOTFILES_DIR" 2>/dev/null)" ]]; then
+    log_info "No dotfiles to deploy"
+    return 0
+  fi
+
+  log_info "Deploying dotfiles..."
+
+  # Find all dotfiles and deploy them
+  find "$DOTFILES_DIR" -type f | while read -r src_file; do
+    # Get relative path from DOTFILES_DIR
+    rel_path="${src_file#$DOTFILES_DIR/}"
+    dest_file="$HOME/$rel_path"
+
+    # Create destination directory if it doesn't exist
+    dest_dir=$(dirname "$dest_file")
+    mkdir -p "$dest_dir"
+
+    # Backup existing file
+    backup_file "$dest_file"
+
+    # Copy file to destination
+    cp "$src_file" "$dest_file"
+    log_success "Deployed $rel_path to $dest_file"
+
+    # Add to managed files list
+    update_managed_files "$dest_file"
+  done
+}
+
+# Update managed files list in state
+update_managed_files() {
+  local file="$1"
+
+  # Use jq to update the state file if available, otherwise use a simple approach
+  if command -v jq >/dev/null 2>&1; then
+    jq --arg file "$file" '.managed_files += [$file] | .managed_files = unique' "$STATE_FILE" >"$STATE_FILE.tmp" &&
+      mv "$STATE_FILE.tmp" "$STATE_FILE"
+  else
+    # Simple approach without jq
+    log_warning "jq not found, state tracking limited"
+  fi
+}
+
+# Update installed packages list in state
+update_installed_packages() {
+  local packages=("$@")
+  
+  if command -v jq >/dev/null 2>&1; then
+    # Create JSON array of packages
+    local packages_json=$(printf '%s\n' "${packages[@]}" | jq -R . | jq -s .)
+    jq --argjson packages "$packages_json" '.installed_packages = $packages' "$STATE_FILE" >"$STATE_FILE.tmp" &&
+      mv "$STATE_FILE.tmp" "$STATE_FILE"
+  else
+    log_warning "jq not found, package tracking limited"
+  fi
+}
+
+# Get previously installed packages from state
+get_installed_packages() {
+  if command -v jq >/dev/null 2>&1 && [[ -f "$STATE_FILE" ]]; then
+    jq -r '.installed_packages[]? // empty' "$STATE_FILE" 2>/dev/null
+  fi
+}
+
+# Switch command - main deployment function
+switch() {
+  log_info "Starting fedora-home-manager switch..."
+
+  # Initialize directories
+  init_dirs
+
+  # Clean up packages that are no longer needed
+  cleanup_packages
+
+  # Install packages
+  install_packages
+
+  # Deploy dotfiles
+  deploy_dotfiles
+
+  # Update state
+  if command -v jq >/dev/null 2>&1; then
+    jq --arg timestamp "$(date -Iseconds)" '.last_switch = $timestamp' "$STATE_FILE" >"$STATE_FILE.tmp" &&
+      mv "$STATE_FILE.tmp" "$STATE_FILE"
+  fi
+
+  log_success "Switch completed successfully!"
+}
+
+# Build command (alias for switch)
+build() {
+  switch
+}
+
+# Add a dotfile to management
+add_dotfile() {
+  local source_file="$1"
+
+  if [[ ! -f "$source_file" ]]; then
+    log_error "File $source_file does not exist"
+    return 1
+  fi
+
+  init_dirs
+
+  # Get relative path from home directory
+  if [[ "$source_file" == "$HOME"* ]]; then
+    rel_path="${source_file#$HOME/}"
+  else
+    rel_path="$(basename "$source_file")"
+  fi
+
+  dest_file="$DOTFILES_DIR/$rel_path"
+  dest_dir=$(dirname "$dest_file")
+
+  # Create destination directory
+  mkdir -p "$dest_dir"
+
+  # Copy file to dotfiles directory
+  cp "$source_file" "$dest_file"
+  log_success "Added $source_file to dotfiles management"
+}
+
+# Remove a dotfile from management
+remove_dotfile() {
+  local rel_path="$1"
+  local dotfile="$DOTFILES_DIR/$rel_path"
+  local home_file="$HOME/$rel_path"
+
+  if [[ -f "$dotfile" ]]; then
+    rm "$dotfile"
+    log_success "Removed $rel_path from dotfiles management"
+  fi
+
+  # Ask if user wants to restore from backup
+  read -p "Do you want to restore $rel_path from backup? (y/N): " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    restore_backup "$home_file"
+  fi
+}
+
+# List managed files
+list_managed() {
+  log_info "Managed dotfiles:"
+  if [[ -d "$DOTFILES_DIR" ]]; then
+    find "$DOTFILES_DIR" -type f | sed "s|$DOTFILES_DIR/|  |" | sort
+  fi
+
+  log_info "Managed packages:"
+  if [[ -f "$PACKAGES_FILE" ]]; then
+    grep -v '^#' "$PACKAGES_FILE" | grep -v '^$' | sed 's/^/  /' || log_info "  No packages"
+  fi
+}
+
+# Show status
+status() {
+  log_info "Fedora Home Manager Status:"
+  echo "  Config directory: $HOME_MANAGER_DIR"
+  echo "  Dotfiles directory: $DOTFILES_DIR"
+  echo "  Packages file: $PACKAGES_FILE"
+
+  if command -v jq >/dev/null 2>&1 && [[ -f "$STATE_FILE" ]]; then
+    last_switch=$(jq -r '.last_switch' "$STATE_FILE")
+    if [[ "$last_switch" != "null" ]]; then
+      echo "  Last switch: $last_switch"
+    else
+      echo "  Last switch: Never"
+    fi
+  fi
+
+  echo
+  list_managed
+}
+
+# Show help
+show_help() {
+  cat <<EOF
+ fedora-home-manager - A home-manager like script for Fedora
+
+ USAGE:
+     fedora-home-manager <COMMAND>
+
+ COMMANDS:
+     init            Initialize configuration structure
+     switch          Apply configuration (install packages, deploy dotfiles, cleanup old packages)
+     build           Alias for switch
+     add <file>      Add a file to dotfiles management
+     remove <path>   Remove a dotfile from management
+     list            List all managed files and packages
+     status          Show current status
+     help            Show this help message
+
+ FEATURES:
+     - Automatic package cleanup: When you remove a package from packages.txt and run switch,
+       the package will be automatically uninstalled from your system.
+     - Package state tracking: Previously installed packages are tracked to enable cleanup.
+
+ FILES:
+     $HOME_MANAGER_DIR/          Main configuration directory
+     $DOTFILES_DIR/              Dotfiles to deploy
+     $PACKAGES_FILE              List of packages to install (one per line)
+     $STATE_FILE                 State tracking file for managed packages and files
+
+ EXAMPLES:
+     fedora-home-manager init
+     fedora-home-manager add ~/.bashrc
+     fedora-home-manager switch
+     fedora-home-manager list
+
+EOF
+}
+
+# Main script logic
+main() {
+  case "${1:-}" in
+  "init")
+    init
+    ;;
+  "switch")
+    switch
+    ;;
+  "build")
+    build
+    ;;
+  "add")
+    if [[ -z "${2:-}" ]]; then
+      log_error "Please specify a file to add"
+      exit 1
+    fi
+    add_dotfile "$2"
+    ;;
+  "remove")
+    if [[ -z "${2:-}" ]]; then
+      log_error "Please specify a path to remove"
+      exit 1
+    fi
+    remove_dotfile "$2"
+    ;;
+  "list")
+    list_managed
+    ;;
+  "status")
+    status
+    ;;
+  "help" | "--help" | "-h")
+    show_help
+    ;;
+  "")
+    log_error "No command specified. Use 'help' for usage information."
+    exit 1
+    ;;
+  *)
+    log_error "Unknown command: $1"
+    show_help
+    exit 1
+    ;;
+  esac
+}
+
+# Run main function with all arguments
+main "$@"
+
