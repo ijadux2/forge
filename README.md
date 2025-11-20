@@ -32,8 +32,8 @@ fedora-home-manager is a bash script that helps you manage your Fedora system co
 ./forge add ~/.bashrc
 
 # Add packages to install (edit the packages file)
-echo "git" >> ~/.config/fedora-home-manager/packages.txt
-echo "vim" >> ~/.config/fedora-home-manager/packages.txt
+echo "git = \"latest\"" >> ~/.config/fedora-home-manager/packages.toml
+echo "vim = \"latest\"" >> ~/.config/fedora-home-manager/packages.toml
 
 # Apply configuration
 ./forge switch
@@ -51,7 +51,7 @@ Initialize the configuration structure and create example files.
 Creates:
 - `~/.config/fedora-home-manager/` - Main configuration directory
 - `~/.config/fedora-home-manager/dotfiles/` - Directory for your dotfiles
-- `~/.config/fedora-home-manager/packages.txt` - List of packages to install
+- `~/.config/fedora-home-manager/packages.toml` - TOML file with packages to install
 - `~/.config/fedora-home-manager/state.json` - State tracking file
 - `~/.config/fedora-home-manager/backup/` - Backup directory for existing files
 
@@ -63,8 +63,8 @@ Apply the current configuration (install packages, deploy dotfiles, cleanup old 
 ```
 
 This command:
-1. Installs all packages listed in `packages.txt`
-2. Uninstalls packages that are no longer in `packages.txt`
+1. Installs all packages listed in `packages.toml`
+2. Uninstalls packages that are no longer in `packages.toml`
 3. Deploys all dotfiles from the dotfiles directory to your home
 4. Creates backups of existing files before overwriting
 5. Updates the state tracking
@@ -129,15 +129,21 @@ Show help message with all available commands.
 
 ## Configuration Files
 
-### packages.txt
-List of Fedora packages to install, one package per line:
-```
-# Comments start with #
-git
-vim
-curl
-wget
-neofetch
+### packages.toml
+List of Fedora packages to install in TOML format:
+```toml
+# Fedora packages configuration
+# TOML format for better package management
+
+[packages]
+# Core development tools
+git = "latest"
+vim = "latest"
+curl = "latest"
+wget = "latest"
+
+# Additional packages can be added with version specifications
+# Example: package_name = "version" or "latest"
 ```
 
 ### dotfiles directory
@@ -161,7 +167,13 @@ Internal state tracking file (managed automatically):
 ## Features
 
 ### Automatic Package Cleanup
-When you remove a package from `packages.txt` and run `switch`, the package will be automatically uninstalled from your system.
+When you remove a package from `packages.toml` and run `switch`, the package will be automatically uninstalled from your system.
+
+### Package State Tracking
+Previously installed packages are tracked to enable cleanup operations.
+
+### TOML Format Support
+Packages are managed in TOML format for better organization and version support.
 
 ### Backup System
 Before overwriting existing files, the script creates timestamped backups in the backup directory.
@@ -190,10 +202,12 @@ Previously installed packages are tracked to enable intelligent cleanup operatio
 ./forge add ~/.bash_profile
 
 # Add development tools
-echo "git" >> ~/.config/fedora-home-manager/packages.txt
-echo "vim" >> ~/.config/fedora-home-manager/packages.txt
-echo "nodejs" >> ~/.config/fedora-home-manager/packages.txt
-echo "npm" >> ~/.config/fedora-home-manager/packages.txt
+cat >> ~/.config/fedora-home-manager/packages.toml << 'EOF'
+git = "latest"
+vim = "latest"
+nodejs = "latest"
+npm = "latest"
+EOF
 
 # Apply configuration
 ./forge switch
@@ -215,7 +229,7 @@ echo "npm" >> ~/.config/fedora-home-manager/packages.txt
 
 ### Removing Packages
 ```bash
-# Edit packages.txt and remove lines for packages you don't want
+# Edit packages.toml and remove entries for packages you don't want
 # Then run switch to uninstall them
 ./forge switch
 ```
@@ -225,7 +239,7 @@ echo "npm" >> ~/.config/fedora-home-manager/packages.txt
 ```
 ~/.config/fedora-home-manager/
 ├── dotfiles/          # Your dotfiles to deploy
-├── packages.txt       # List of packages to install
+├── packages.toml      # TOML file with packages to install
 ├── state.json         # State tracking
 └── backup/           # Backups of replaced files
 ```
