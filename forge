@@ -8,7 +8,7 @@ set -euo pipefail
 # Configuration
 HOME_MANAGER_DIR="${HOME_MANAGER_DIR:-$HOME/.config/fedora-home-manager}"
 DOTFILES_DIR="$HOME_MANAGER_DIR/dotfiles"
-PACKAGES_FILE="$HOME_MANAGER_DIR/packages.txt"
+PACKAGES_FILE="$HOME_MANAGER_DIR/packages.toml"
 STATE_FILE="$HOME_MANAGER_DIR/state.json"
 BACKUP_DIR="$HOME_MANAGER_DIR/backup"
 
@@ -51,17 +51,21 @@ init() {
     log_success "Created state file: $STATE_FILE"
   fi
 
-  # Create initial packages file with example content if it doesn't exist
+  # Create initial packages file with TOML format if it doesn't exist
   if [[ ! -f "$PACKAGES_FILE" ]]; then
     cat >"$PACKAGES_FILE" <<'EOF'
-# Fedora packages to install
-# One package per line
-# Lines starting with # are comments
-# Example:
-# git
-# vim
-# curl
-# wget
+# Fedora packages configuration
+# TOML format for better package management
+
+[packages]
+# Core development tools
+# git = "latest"
+# vim = "latest"
+# curl = "latest"
+# wget = "latest"
+
+# Additional packages can be added with version specifications
+# Example: package_name = "version" or "latest"
 EOF
     log_success "Created packages file: $PACKAGES_FILE"
   fi
@@ -131,18 +135,22 @@ install_packages() {
 
   local current_packages=()
   
-  # Read packages and install them
-  while IFS= read -r package; do
-    # Skip empty lines and comments
-    [[ -z "$package" || "$package" == \#* ]] && continue
-
-    current_packages+=("$package")
+  # Parse TOML and extract package names
+  while IFS= read -r line; do
+    # Skip empty lines, comments, and section headers
+    [[ -z "$line" || "$line" == \#* || "$line" == \[* ]] && continue
     
-    log_info "Installing package: $package"
-    if sudo dnf install -y "$package"; then
-      log_success "Installed $package"
-    else
-      log_error "Failed to install $package"
+    # Extract package name (before =)
+    if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*= ]]; then
+      local package="${BASH_REMATCH[1]// /}"  # Remove whitespace
+      current_packages+=("$package")
+      
+      log_info "Installing package: $package"
+      if sudo dnf install -y "$package"; then
+        log_success "Installed $package"
+      else
+        log_error "Failed to install $package"
+      fi
     fi
   done <"$PACKAGES_FILE"
 
@@ -150,16 +158,22 @@ install_packages() {
   update_installed_packages "${current_packages[@]}"
 }
 
-# Uninstall packages that are no longer in packages.txt
+# Uninstall packages that are no longer in packages.toml
 cleanup_packages() {
   log_info "Cleaning up packages that are no longer needed..."
 
-  # Get current packages from packages.txt
+  # Get current packages from packages.toml
   local current_packages=()
   if [[ -f "$PACKAGES_FILE" ]]; then
-    while IFS= read -r package; do
-      [[ -z "$package" || "$package" == \#* ]] && continue
-      current_packages+=("$package")
+    while IFS= read -r line; do
+      # Skip empty lines, comments, and section headers
+      [[ -z "$line" || "$line" == \#* || "$line" == \[* ]] && continue
+      
+      # Extract package name (before =)
+      if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*= ]]; then
+        local package="${BASH_REMATCH[1]// /}"  # Remove whitespace
+        current_packages+=("$package")
+      fi
     done <"$PACKAGES_FILE"
   fi
 
@@ -353,7 +367,31 @@ list_managed() {
 
   log_info "Managed packages:"
   if [[ -f "$PACKAGES_FILE" ]]; then
-    grep -v '^#' "$PACKAGES_FILE" | grep -v '^$' | sed 's/^/  /' || log_info "  No packages"
+    while IFS= read -r line; do
+      # Skip empty lines, comments, and section headers
+      [[ -z "$line" || "$line" == \#* || "$line" == \[* ]] && continue
+      
+      # Extract package name (before =)
+      if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*= ]]; then
+        local package="${BASH_REMATCH[1]// /}"  # Remove whitespace
+        echo "  $package"
+      fi
+    done <"$PACKAGES_FILE"
+    
+    # Check if any packages were found
+    local package_count=0
+    while IFS= read -r line; do
+      [[ -z "$line" || "$line" == \#* || "$line" == \[* ]] && continue
+      if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*= ]]; then
+        ((package_count++))
+      fi
+    done <"$PACKAGES_FILE"
+    
+    if [[ $package_count -eq 0 ]]; then
+      log_info "  No packages"
+    fi
+  else
+    log_info "  No packages"
   fi
 }
 
@@ -396,15 +434,16 @@ show_help() {
      help            Show this help message
 
  FEATURES:
-     - Automatic package cleanup: When you remove a package from packages.txt and run switch,
-       the package will be automatically uninstalled from your system.
-     - Package state tracking: Previously installed packages are tracked to enable cleanup.
+      - Automatic package cleanup: When you remove a package from packages.toml and run switch,
+        the package will be automatically uninstalled from your system.
+      - Package state tracking: Previously installed packages are tracked to enable cleanup.
+      - TOML format: Packages are managed in TOML format for better organization and version support.
 
- FILES:
-     $HOME_MANAGER_DIR/          Main configuration directory
-     $DOTFILES_DIR/              Dotfiles to deploy
-     $PACKAGES_FILE              List of packages to install (one per line)
-     $STATE_FILE                 State tracking file for managed packages and files
+  FILES:
+      $HOME_MANAGER_DIR/          Main configuration directory
+      $DOTFILES_DIR/              Dotfiles to deploy
+      $PACKAGES_FILE              TOML file with packages to install (supports version specifications)
+      $STATE_FILE                 State tracking file for managed packages and files
 
  EXAMPLES:
      fedora-home-manager init
