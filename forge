@@ -36,7 +36,7 @@ log_error() {
 # Initialize command - creates forge.toml and .config directory
 init() {
   log_info "Initializing forge..."
-  
+
   # Create directory
   mkdir -p "$FORGE_DIR"
 
@@ -93,22 +93,22 @@ parse_toml() {
   while IFS= read -r line; do
     # Skip comments and empty lines
     [[ -z "$line" || "$line" == \#* ]] && continue
-    
+
     # Check for section headers
     if [[ "$line" =~ ^\[(.+)\]$ ]]; then
       section="${BASH_REMATCH[1]}"
       continue
     fi
-    
+
     # Parse key-value pairs for non-packages sections
     if [[ "$section" != "packages" && "$line" =~ ^([^=]+)=(.+)$ ]]; then
       local key="${BASH_REMATCH[1]}"
       local value="${BASH_REMATCH[2]}"
-      
+
       # Trim leading/trailing whitespace from key and value
       key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
       value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-      
+
       # Remove quotes from quoted strings
       if [[ "$key" =~ ^\"(.*)\"$ ]]; then
         key="${BASH_REMATCH[1]}"
@@ -116,7 +116,7 @@ parse_toml() {
       if [[ "$value" =~ ^\"(.*)\"$ ]]; then
         value="${BASH_REMATCH[1]}"
       fi
-      
+
       echo "$section:$key=$value"
     # Parse package names (just keys without values in packages section)
     elif [[ "$section" == "packages" && "$line" =~ ^([^=]+)$ ]]; then
@@ -133,13 +133,13 @@ parse_toml() {
 # Enable COPR repositories from forge.toml
 enable_copr_repos() {
   log_info "Enabling COPR repositories..."
-  
+
   local copr_enabled=false
-  
+
   while IFS='=' read -r entry; do
     local section="${entry%%:*}"
     local copr_repo="${entry#*:}"
-    
+
     if [[ "$section" == "copr" && -n "$copr_repo" ]]; then
       copr_enabled=true
       log_info "Enabling COPR repository: $copr_repo"
@@ -150,7 +150,7 @@ enable_copr_repos() {
       fi
     fi
   done < <(parse_toml)
-  
+
   if [[ "$copr_enabled" == false ]]; then
     log_info "No COPR repositories to enable"
   fi
@@ -159,21 +159,21 @@ enable_copr_repos() {
 # Disable COPR repositories that are no longer in forge.toml
 disable_copr_repos() {
   log_info "Checking for COPR repositories to disable..."
-  
+
   # Get currently enabled COPR repos
   local enabled_repos=$(sudo dnf copr list --enabled 2>/dev/null | grep -E "copr\.fedorainfracloud\.org" | awk '{print $1}' || true)
-  
+
   # Get configured COPR repos from forge.toml
   local configured_repos=""
   while IFS='=' read -r entry; do
     local section="${entry%%:*}"
     local copr_repo="${entry#*:}"
-    
+
     if [[ "$section" == "copr" && -n "$copr_repo" ]]; then
       configured_repos="$configured_repos $copr_repo"
     fi
   done < <(parse_toml)
-  
+
   # Disable repos that are enabled but not configured
   for repo in $enabled_repos; do
     if [[ ! " $configured_repos " =~ " $repo " ]]; then
@@ -190,13 +190,13 @@ disable_copr_repos() {
 # Install packages from forge.toml
 install_packages() {
   log_info "Installing packages..."
-  
+
   local packages_installed=false
-  
+
   while IFS='=' read -r entry; do
     local section="${entry%%:*}"
     local package="${entry#*:}"
-    
+
     if [[ "$section" == "packages" && -n "$package" ]]; then
       packages_installed=true
       log_info "Installing package: $package"
@@ -207,7 +207,7 @@ install_packages() {
       fi
     fi
   done < <(parse_toml)
-  
+
   if [[ "$packages_installed" == false ]]; then
     log_info "No packages to install"
   fi
@@ -216,29 +216,29 @@ install_packages() {
 # Deploy dotfiles using symlinks
 deploy_dotfiles() {
   log_info "Deploying dotfiles..."
-  
+
   local dotfiles_deployed=false
-  
+
   while IFS='=' read -r entry; do
     local section="${entry%%:*}"
     local key_value="${entry#*:}"
     local target="${key_value%%=*}"
     local source="${key_value##*=}"
-    
+
     if [[ "$section" == "dotfiles" ]]; then
       dotfiles_deployed=true
-      
+
       local target_path="$HOME/$target"
       local source_path="$FORGE_DIR/$source"
-      
+
       # Create source directory if it doesn't exist
       local source_dir=$(dirname "$source_path")
       mkdir -p "$source_dir"
-      
+
       # Create target directory if it doesn't exist
       local target_dir=$(dirname "$target_path")
       mkdir -p "$target_dir"
-      
+
       # Backup existing file if it exists and is not a symlink
       if [[ -f "$target_path" && ! -L "$target_path" ]]; then
         local backup_dir="$FORGE_DIR/backup"
@@ -247,10 +247,10 @@ deploy_dotfiles() {
         cp "$target_path" "$backup_path"
         log_info "Backed up $target_path to $backup_path"
       fi
-      
+
       # Remove existing file/symlink
       rm -f "$target_path"
-      
+
       # Create symlink
       if ln -s "$source_path" "$target_path"; then
         log_success "Created symlink: $target_path -> $source_path"
@@ -259,7 +259,7 @@ deploy_dotfiles() {
       fi
     fi
   done < <(parse_toml)
-  
+
   if [[ "$dotfiles_deployed" == false ]]; then
     log_info "No dotfiles to deploy"
   fi
@@ -268,30 +268,30 @@ deploy_dotfiles() {
 # Switch command - apply configuration
 switch() {
   log_info "Starting forge switch..."
-  
+
   # Check if forge.toml exists
   if [[ ! -f "$FORGE_TOML" ]]; then
     log_error "forge.toml not found. Run 'forge init' first."
     exit 1
   fi
-  
+
   # Enable COPR repositories
   enable_copr_repos
-  
+
   # Disable COPR repositories that are no longer configured
   disable_copr_repos
-  
+
   # Install packages
   install_packages
-  
+
   # Deploy dotfiles
   deploy_dotfiles
-  
+
   # Update last_switch timestamp
   if command -v sed >/dev/null 2>&1; then
     sed -i "s/last_switch = .*/last_switch = \"$(date -Iseconds)\"/" "$FORGE_TOML"
   fi
-  
+
   log_success "Switch completed successfully!"
 }
 
@@ -300,11 +300,11 @@ status() {
   log_info "Forge Status"
   echo "  Config directory: $FORGE_DIR"
   echo "  Config file: $FORGE_TOML"
-  
+
   if [[ -f "$FORGE_TOML" ]]; then
     echo
     log_info "Configuration:"
-    
+
     # Show last switch time
     local last_switch=$(grep "last_switch" "$FORGE_TOML" | cut -d'=' -f2 | tr -d ' "')
     if [[ -n "$last_switch" && "$last_switch" != "null" ]]; then
@@ -312,45 +312,45 @@ status() {
     else
       echo "  Last switch: Never"
     fi
-    
+
     echo
     log_info "COPR Repositories:"
     local copr_count=0
     while IFS='=' read -r entry; do
       local section="${entry%%:*}"
       local copr_repo="${entry#*:}"
-      
+
       if [[ "$section" == "copr" && -n "$copr_repo" ]]; then
         echo "  $copr_repo"
         ((copr_count++))
       fi
     done < <(parse_toml)
-    
+
     if [[ $copr_count -eq 0 ]]; then
       echo "  No COPR repositories configured"
     else
       echo "  Total: $copr_count COPR repositories"
     fi
-    
+
     echo
     log_info "Packages:"
     local package_count=0
     while IFS='=' read -r entry; do
       local section="${entry%%:*}"
       local package="${entry#*:}"
-      
+
       if [[ "$section" == "packages" && -n "$package" ]]; then
         echo "  $package"
         ((package_count++))
       fi
     done < <(parse_toml)
-    
+
     if [[ $package_count -eq 0 ]]; then
       echo "  No packages configured"
     else
       echo "  Total: $package_count packages"
     fi
-    
+
     echo
     log_info "Dotfiles:"
     local dotfile_count=0
@@ -359,13 +359,13 @@ status() {
       local key_value="${entry#*:}"
       local target="${key_value%%=*}"
       local source="${key_value##*=}"
-      
+
       if [[ "$section" == "dotfiles" ]]; then
         echo "  $target -> $source"
         ((dotfile_count++))
       fi
     done < <(parse_toml)
-    
+
     if [[ $dotfile_count -eq 0 ]]; then
       echo "  No dotfiles configured"
     else
@@ -440,3 +440,4 @@ main() {
 
 # Run main function with all arguments
 main "$@"
+
