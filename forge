@@ -52,10 +52,11 @@ last_switch = null
 
 [packages]
 # List of packages to install using dnf
+# Just list package names - presence means install, absence means don't install
 # Examples:
-# git = true
-# vim = true
-# curl = true
+# git
+# vim
+# curl
 
 [dotfiles]
 # Dotfiles to manage with symlinks
@@ -92,11 +93,15 @@ parse_toml() {
       continue
     fi
     
-    # Parse key-value pairs
-    if [[ "$line" =~ ^([^=]+)=(.+)$ ]]; then
+    # Parse key-value pairs for non-packages sections
+    if [[ "$section" != "packages" && "$line" =~ ^([^=]+)=(.+)$ ]]; then
       local key="${BASH_REMATCH[1]// /}"
       local value="${BASH_REMATCH[2]// /}"
       echo "$section:$key=$value"
+    # Parse package names (just keys without values in packages section)
+    elif [[ "$section" == "packages" && "$line" =~ ^([^=]+)$ ]]; then
+      local package="${BASH_REMATCH[1]// /}"
+      echo "$section:$package"
     fi
   done <"$FORGE_TOML"
 }
@@ -109,11 +114,9 @@ install_packages() {
   
   while IFS='=' read -r entry; do
     local section="${entry%%:*}"
-    local key_value="${entry#*:}"
-    local package="${key_value%%=*}"
-    local enabled="${key_value##*=}"
+    local package="${entry#*:}"
     
-    if [[ "$section" == "packages" && "$enabled" == "true" ]]; then
+    if [[ "$section" == "packages" && -n "$package" ]]; then
       packages_installed=true
       log_info "Installing package: $package"
       if sudo dnf install -y "$package"; then
@@ -228,11 +231,9 @@ status() {
     local package_count=0
     while IFS='=' read -r entry; do
       local section="${entry%%:*}"
-      local key_value="${entry#*:}"
-      local package="${key_value%%=*}"
-      local enabled="${key_value##*=}"
+      local package="${entry#*:}"
       
-      if [[ "$section" == "packages" && "$enabled" == "true" ]]; then
+      if [[ "$section" == "packages" && -n "$package" ]]; then
         echo "  $package"
         ((package_count++))
       fi

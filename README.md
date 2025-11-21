@@ -99,11 +99,11 @@ last_switch = null
 
 [packages]
 # List of packages to install using dnf
-# Set to true to install, false or comment out to skip
-git = true
-vim = true
-curl = true
-wget = true
+# Just list package names - presence means install, absence means don't install
+git
+vim
+curl
+wget
 
 [dotfiles]
 # Dotfiles to manage with symlinks
@@ -127,7 +127,20 @@ backup_dir = "backup"
 - `last_switch`: Timestamp of last switch operation (auto-updated)
 
 #### `[packages]`
-List of packages to install via dnf. Set to `true` to install, `false` or comment out to skip.
+List of packages to install via dnf. **Just list package names** - presence means install, absence means don't install.
+
+**Examples:**
+```toml
+[packages]
+git
+vim
+curl
+wget
+nodejs
+npm
+```
+
+To remove a package, simply delete the line containing the package name.
 
 #### `[dotfiles]`
 Dotfile mappings using symlinks:
@@ -155,18 +168,18 @@ Additional configuration options:
 
 ## How It Works
 
+### Package Management
+Packages are managed through the `[packages]` section in `forge.toml`:
+- **Add package**: Simply add the package name on a new line
+- **Remove package**: Delete the line containing the package name
+- **No flags needed**: Just presence/absence of the package name matters
+
 ### Dotfile Management
 Forge uses symlinks to manage dotfiles:
 1. Your actual dotfiles are stored in `~/.config/forge/dotfiles/`
 2. Symlinks are created from your home directory to these files
 3. This allows you to version control your dotfiles in one place
 4. Changes to the source files are immediately reflected in your home directory
-
-### Package Management
-Packages are managed through the `[packages]` section in `forge.toml`:
-- Packages set to `true` are installed via `dnf`
-- Packages set to `false` or commented out are ignored
-- No automatic uninstallation (unlike the previous version)
 
 ### Backup System
 Before creating symlinks, Forge:
@@ -182,16 +195,17 @@ Before creating symlinks, Forge:
 # Initialize forge
 ./forge init
 
-# Create your dotfiles directory and add files
-mkdir -p ~/.config/forge/dotfiles
-echo "export EDITOR=vim" > ~/.config/forge/dotfiles/.bashrc
-
-# Edit forge.toml to configure
+# Edit forge.toml to add packages
 nano ~/.config/forge/forge.toml
 
 # Add to [packages] section:
-git = true
-vim = true
+git
+vim
+curl
+
+# Create your dotfiles directory and add files
+mkdir -p ~/.config/forge/dotfiles
+echo "export EDITOR=vim" > ~/.config/forge/dotfiles/.bashrc
 
 # Add to [dotfiles] section:
 ".bashrc" = "dotfiles/.bashrc"
@@ -214,6 +228,25 @@ nano ~/.config/forge/forge.toml
 
 # Apply changes
 ./forge switch
+```
+
+### Package Management Examples
+```toml
+[packages]
+# Development tools
+git
+vim
+nodejs
+npm
+
+# System utilities
+curl
+wget
+tree
+htop
+
+# To remove a package, just delete the line
+# For example, to remove htop, delete the "htop" line
 ```
 
 ### Version Control Your Configuration
@@ -240,11 +273,22 @@ git commit -m "Updated vim configuration"
 
 ## Migration from Previous Version
 
-If you were using the old version of forge:
+If you were using the old version of forge with `git = true` format:
 
 1. Your existing configuration will not be automatically migrated
 2. Run `./forge init` to create the new `forge.toml` structure
-3. Manually migrate your packages and dotfile configurations to the new TOML format
+3. Convert your package configuration from:
+   ```toml
+   # Old format
+   git = true
+   vim = true
+   ```
+   to:
+   ```toml
+   # New format
+   git
+   vim
+   ```
 4. Move your existing dotfiles from the old directory to `~/.config/forge/dotfiles/`
 
 ## License
