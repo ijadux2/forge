@@ -7,10 +7,7 @@ set -euo pipefail
 
 # Configuration
 FORGE_DIR="${FORGE_DIR:-$HOME/.config/forge}"
-DOTFILES_DIR="$FORGE_DIR/dotfiles"
-PACKAGES_FILE="$FORGE_DIR/packages.toml"
-STATE_FILE="$FORGE_DIR/state.json"
-BACKUP_DIR="$FORGE_DIR/backup"
+FORGE_TOML="$FORGE_DIR/forge.toml"
 
 # Colors
 RED='\033[0;31m'
@@ -36,114 +33,88 @@ log_error() {
   echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Initialize command - set up the configuration structure
+# Initialize command - creates forge.toml and .config directory
 init() {
   log_info "Initializing forge..."
   
-  # Create directories
+  # Create directory
   mkdir -p "$FORGE_DIR"
-  mkdir -p "$DOTFILES_DIR"
-  mkdir -p "$BACKUP_DIR"
 
-  # Create initial state file if it doesn't exist
-  if [[ ! -f "$STATE_FILE" ]]; then
-    echo '{"version": "1.0", "last_switch": null, "managed_files": []}' >"$STATE_FILE"
-    log_success "Created state file: $STATE_FILE"
-  fi
+  # Create initial forge.toml if it doesn't exist
+  if [[ ! -f "$FORGE_TOML" ]]; then
+    cat >"$FORGE_TOML" <<'EOF'
+# Forge Configuration File
+# User-level configuration similar to home-manager/nixos
 
-  # Create initial packages file with simplified format if it doesn't exist
-  if [[ ! -f "$PACKAGES_FILE" ]]; then
-    cat >"$PACKAGES_FILE" <<'EOF'
-# Forge packages configuration
-# Simple format: just list package names, one per line
+[forge]
+version = "1.0"
+last_switch = null
 
-# Core development tools
-# git
-# vim
-# curl
-# wget
+[packages]
+# List of packages to install using dnf
+# Examples:
+# git = true
+# vim = true
+# curl = true
 
-# Additional packages can be added as simple package names
-# Example: package_name
+[dotfiles]
+# Dotfiles to manage with symlinks
+# Format: "target_path" = "source_path"
+# target_path: where the symlink should be created (relative to home directory)
+# source_path: where the actual file is stored (relative to forge directory)
+# Examples:
+# ".bashrc" = "dotfiles/.bashrc"
+# ".config/vimrc" = "dotfiles/vimrc"
+
+[options]
+# Additional options
+backup = true
+backup_dir = "backup"
 EOF
-    log_success "Created packages file: $PACKAGES_FILE"
-  fi
-
-  # Create example dotfiles structure
-  if [[ ! -f "$DOTFILES_DIR/.gitkeep" ]]; then
-    touch "$DOTFILES_DIR/.gitkeep"
-    log_info "Created dotfiles directory: $DOTFILES_DIR"
+    log_success "Created forge.toml: $FORGE_TOML"
   fi
 
   log_success "Initialization complete!"
-  log_info "Add packages to $PACKAGES_FILE and dotfiles to $DOTFILES_DIR/"
+  log_info "Edit $FORGE_TOML to configure packages and dotfiles"
   log_info "Run 'forge switch' to apply your configuration"
 }
 
-# Initialize directories
-init_dirs() {
-  mkdir -p "$FORGE_DIR"
-  mkdir -p "$DOTFILES_DIR"
-  mkdir -p "$BACKUP_DIR"
-
-  # Create initial state file if it doesn't exist
-  if [[ ! -f "$STATE_FILE" ]]; then
-    echo '{"version": "1.0", "last_switch": null, "managed_files": []}' >"$STATE_FILE"
-  fi
-
-  # Create initial packages file if it doesn't exist
-  if [[ ! -f "$PACKAGES_FILE" ]]; then
-    touch "$PACKAGES_FILE"
-  fi
-}
-
-# Backup existing files
-backup_file() {
-  local file="$1"
-  local backup_path="$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d_%H%M%S).bak"
-
-  if [[ -f "$file" ]]; then
-    cp "$file" "$backup_path"
-    log_info "Backed up $file to $backup_path"
-  fi
-}
-
-# Restore files from backup
-restore_backup() {
-  local file="$1"
-  local latest_backup=$(ls -t "$BACKUP_DIR"/$(basename "$file")*.bak 2>/dev/null | head -1)
-
-  if [[ -n "$latest_backup" ]]; then
-    cp "$latest_backup" "$file"
-    log_success "Restored $file from backup"
-    return 0
-  else
-    log_warning "No backup found for $file"
-    return 1
-  fi
-}
-
-# Install packages using dnf
-install_packages() {
-  if [[ ! -f "$PACKAGES_FILE" ]] || [[ ! -s "$PACKAGES_FILE" ]]; then
-    log_info "No packages to install"
-    return 0
-  fi
-
-  log_info "Installing packages..."
-
-  local current_packages=()
-  
-  # Parse simple format and extract package names
+# Parse TOML file (basic implementation)
+parse_toml() {
+  local section=""
   while IFS= read -r line; do
-    # Skip empty lines and comments
+    # Skip comments and empty lines
     [[ -z "$line" || "$line" == \#* ]] && continue
     
-    # Remove whitespace and use as package name
-    local package="${line// /}"  # Remove whitespace
-    if [[ -n "$package" ]]; then
-      current_packages+=("$package")
-      
+    # Check for section headers
+    if [[ "$line" =~ ^\[(.+)\]$ ]]; then
+      section="${BASH_REMATCH[1]}"
+      continue
+    fi
+    
+    # Parse key-value pairs
+    if [[ "$line" =~ ^([^=]+)=(.+)$ ]]; then
+      local key="${BASH_REMATCH[1]// /}"
+      local value="${BASH_REMATCH[2]// /}"
+      echo "$section:$key=$value"
+    fi
+  done <"$FORGE_TOML"
+}
+
+# Install packages from forge.toml
+install_packages() {
+  log_info "Installing packages..."
+  
+  local packages_installed=false
+  
+  while IFS='=' read -r entry; do
+    local section="${entry%%:*}"
+    local key_value="${entry#*:}"
+    local package="${key_value%%=*}"
+    local enabled="${key_value##*=}"
+    
+    if [[ "$section" == "packages" && "$enabled" == "true" ]]; then
+      packages_installed=true
       log_info "Installing package: $package"
       if sudo dnf install -y "$package"; then
         log_success "Installed $package"
@@ -151,286 +122,151 @@ install_packages() {
         log_error "Failed to install $package"
       fi
     fi
-  done <"$PACKAGES_FILE"
-
-  # Update state with current packages
-  update_installed_packages "${current_packages[@]}"
-}
-
-# Uninstall packages that are no longer in packages.toml
-cleanup_packages() {
-  log_info "Cleaning up packages that are no longer needed..."
-
-  # Get current packages from packages.toml
-  local current_packages=()
-  if [[ -f "$PACKAGES_FILE" ]]; then
-    while IFS= read -r line; do
-      # Skip empty lines and comments
-      [[ -z "$line" || "$line" == \#* ]] && continue
-      
-      # Remove whitespace and use as package name
-      local package="${line// /}"  # Remove whitespace
-      if [[ -n "$package" ]]; then
-        current_packages+=("$package")
-      fi
-    done <"$PACKAGES_FILE"
-  fi
-
-  # Get previously installed packages from state
-  local previous_packages=()
-  while IFS= read -r package; do
-    [[ -n "$package" ]] && previous_packages+=("$package")
-  done < <(get_installed_packages)
-
-  # Find packages to uninstall (in previous but not in current)
-  local packages_to_uninstall=()
-  for prev_pkg in "${previous_packages[@]}"; do
-    local found=false
-    for curr_pkg in "${current_packages[@]}"; do
-      if [[ "$prev_pkg" == "$curr_pkg" ]]; then
-        found=true
-        break
-      fi
-    done
-    if [[ "$found" == false ]]; then
-      packages_to_uninstall+=("$prev_pkg")
-    fi
-  done
-
-  # Uninstall packages that are no longer needed
-  if [[ ${#packages_to_uninstall[@]} -gt 0 ]]; then
-    log_info "Uninstalling ${#packages_to_uninstall[@]} packages that are no longer needed..."
-    for package in "${packages_to_uninstall[@]}"; do
-      log_info "Uninstalling package: $package"
-      if sudo dnf remove -y "$package"; then
-        log_success "Uninstalled $package"
-      else
-        log_error "Failed to uninstall $package"
-      fi
-    done
-  else
-    log_info "No packages to uninstall"
-  fi
-}
-
-# Deploy dotfiles
-deploy_dotfiles() {
-  if [[ ! -d "$DOTFILES_DIR" ]] || [[ -z "$(ls -A "$DOTFILES_DIR" 2>/dev/null)" ]]; then
-    log_info "No dotfiles to deploy"
-    return 0
-  fi
-
-  log_info "Deploying dotfiles..."
-
-  # Find all dotfiles and deploy them
-  find "$DOTFILES_DIR" -type f | while read -r src_file; do
-    # Get relative path from DOTFILES_DIR
-    rel_path="${src_file#$DOTFILES_DIR/}"
-    dest_file="$HOME/$rel_path"
-
-    # Create destination directory if it doesn't exist
-    dest_dir=$(dirname "$dest_file")
-    mkdir -p "$dest_dir"
-
-    # Backup existing file
-    backup_file "$dest_file"
-
-    # Copy file to destination
-    cp "$src_file" "$dest_file"
-    log_success "Deployed $rel_path to $dest_file"
-
-    # Add to managed files list
-    update_managed_files "$dest_file"
-  done
-}
-
-# Update managed files list in state
-update_managed_files() {
-  local file="$1"
-
-  # Use jq to update the state file if available, otherwise use a simple approach
-  if command -v jq >/dev/null 2>&1; then
-    jq --arg file "$file" '.managed_files += [$file] | .managed_files = unique' "$STATE_FILE" >"$STATE_FILE.tmp" &&
-      mv "$STATE_FILE.tmp" "$STATE_FILE"
-  else
-    # Simple approach without jq
-    log_warning "jq not found, state tracking limited"
-  fi
-}
-
-# Update installed packages list in state
-update_installed_packages() {
-  local packages=("$@")
+  done < <(parse_toml)
   
-  if command -v jq >/dev/null 2>&1; then
-    # Create JSON array of packages
-    local packages_json=$(printf '%s\n' "${packages[@]}" | jq -R . | jq -s .)
-    jq --argjson packages "$packages_json" '.installed_packages = $packages' "$STATE_FILE" >"$STATE_FILE.tmp" &&
-      mv "$STATE_FILE.tmp" "$STATE_FILE"
-  else
-    log_warning "jq not found, package tracking limited"
+  if [[ "$packages_installed" == false ]]; then
+    log_info "No packages to install"
   fi
 }
 
-# Get previously installed packages from state
-get_installed_packages() {
-  if command -v jq >/dev/null 2>&1 && [[ -f "$STATE_FILE" ]]; then
-    jq -r '.installed_packages[]? // empty' "$STATE_FILE" 2>/dev/null
+# Deploy dotfiles using symlinks
+deploy_dotfiles() {
+  log_info "Deploying dotfiles..."
+  
+  local dotfiles_deployed=false
+  
+  while IFS='=' read -r entry; do
+    local section="${entry%%:*}"
+    local key_value="${entry#*:}"
+    local target="${key_value%%=*}"
+    local source="${key_value##*=}"
+    
+    if [[ "$section" == "dotfiles" ]]; then
+      dotfiles_deployed=true
+      
+      local target_path="$HOME/$target"
+      local source_path="$FORGE_DIR/$source"
+      
+      # Create source directory if it doesn't exist
+      local source_dir=$(dirname "$source_path")
+      mkdir -p "$source_dir"
+      
+      # Create target directory if it doesn't exist
+      local target_dir=$(dirname "$target_path")
+      mkdir -p "$target_dir"
+      
+      # Backup existing file if it exists and is not a symlink
+      if [[ -f "$target_path" && ! -L "$target_path" ]]; then
+        local backup_dir="$FORGE_DIR/backup"
+        mkdir -p "$backup_dir"
+        local backup_path="$backup_dir/$(basename "$target").$(date +%Y%m%d_%H%M%S).bak"
+        cp "$target_path" "$backup_path"
+        log_info "Backed up $target_path to $backup_path"
+      fi
+      
+      # Remove existing file/symlink
+      rm -f "$target_path"
+      
+      # Create symlink
+      if ln -s "$source_path" "$target_path"; then
+        log_success "Created symlink: $target_path -> $source_path"
+      else
+        log_error "Failed to create symlink: $target_path -> $source_path"
+      fi
+    fi
+  done < <(parse_toml)
+  
+  if [[ "$dotfiles_deployed" == false ]]; then
+    log_info "No dotfiles to deploy"
   fi
 }
 
-# Switch command - main deployment function
+# Switch command - apply configuration
 switch() {
   log_info "Starting forge switch..."
-
-  # Initialize directories
-  init_dirs
-
-  # Clean up packages that are no longer needed
-  cleanup_packages
-
+  
+  # Check if forge.toml exists
+  if [[ ! -f "$FORGE_TOML" ]]; then
+    log_error "forge.toml not found. Run 'forge init' first."
+    exit 1
+  fi
+  
   # Install packages
   install_packages
-
+  
   # Deploy dotfiles
   deploy_dotfiles
-
-  # Update state
-  if command -v jq >/dev/null 2>&1; then
-    jq --arg timestamp "$(date -Iseconds)" '.last_switch = $timestamp' "$STATE_FILE" >"$STATE_FILE.tmp" &&
-      mv "$STATE_FILE.tmp" "$STATE_FILE"
+  
+  # Update last_switch timestamp
+  if command -v sed >/dev/null 2>&1; then
+    sed -i "s/last_switch = .*/last_switch = \"$(date -Iseconds)\"/" "$FORGE_TOML"
   fi
-
+  
   log_success "Switch completed successfully!"
 }
 
-# Build command (alias for switch)
-build() {
-  switch
-}
-
-# Add a dotfile to management
-add_dotfile() {
-  local source_file="$1"
-
-  if [[ ! -f "$source_file" ]]; then
-    log_error "File $source_file does not exist"
-    return 1
-  fi
-
-  init_dirs
-
-  # Get relative path from home directory
-  if [[ "$source_file" == "$HOME"* ]]; then
-    rel_path="${source_file#$HOME/}"
-  else
-    rel_path="$(basename "$source_file")"
-  fi
-
-  dest_file="$DOTFILES_DIR/$rel_path"
-  dest_dir=$(dirname "$dest_file")
-
-  # Create destination directory
-  mkdir -p "$dest_dir"
-
-  # Copy file to dotfiles directory
-  cp "$source_file" "$dest_file"
-  log_success "Added $source_file to dotfiles management"
-}
-
-# Remove a dotfile from management
-remove_dotfile() {
-  local rel_path="$1"
-  local dotfile="$DOTFILES_DIR/$rel_path"
-  local home_file="$HOME/$rel_path"
-
-  if [[ -f "$dotfile" ]]; then
-    rm "$dotfile"
-    log_success "Removed $rel_path from dotfiles management"
-  fi
-
-  # Ask if user wants to restore from backup
-  read -p "Do you want to restore $rel_path from backup? (y/N): " -n 1 -r
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    restore_backup "$home_file"
-  fi
-}
-
-# Generate random Linux-inspired name
-generate_forge_name() {
-  local adjectives=("swift" "bold" "noble" "fierce" "wise" "ancient" "crystal" "iron" "steel" "shadow" "light" "dark" "golden" "silver" "bronze" "cosmic" "quantum" "neural" "atomic" "stellar")
-  local nouns=("eagle" "wolf" "lion" "tiger" "dragon" "phoenix" "hawk" "falcon" "bear" "panther" "lynx" "owl" "raven" "cobra" "viper" "python" "jaguar" "leopard" "cheetah" "cougar")
-  local suffix=("linux" "kernel" "system" "forge" "core" "engine" "matrix" "network" "protocol" "framework" "platform" "architecture" "interface" "module" "library" "runtime" "daemon" "service" "process" "thread")
-  
-  local adj=${adjectives[$RANDOM % ${#adjectives[@]}]}
-  local noun=${nouns[$RANDOM % ${#nouns[@]}]}
-  local suff=${suffix[$RANDOM % ${#suffix[@]}]}
-  
-  echo "${adj}-${noun}-${suff}"
-}
-
-# List managed files with status
-list_managed() {
-  local forge_name=$(generate_forge_name)
-  
-  log_info "Forge Status: $forge_name"
+# Status command - show current configuration
+status() {
+  log_info "Forge Status"
   echo "  Config directory: $FORGE_DIR"
-  echo "  Dotfiles directory: $DOTFILES_DIR"
-  echo "  Packages file: $PACKAGES_FILE"
-
-  if command -v jq >/dev/null 2>&1 && [[ -f "$STATE_FILE" ]]; then
-    last_switch=$(jq -r '.last_switch' "$STATE_FILE")
-    if [[ "$last_switch" != "null" ]]; then
+  echo "  Config file: $FORGE_TOML"
+  
+  if [[ -f "$FORGE_TOML" ]]; then
+    echo
+    log_info "Configuration:"
+    
+    # Show last switch time
+    local last_switch=$(grep "last_switch" "$FORGE_TOML" | cut -d'=' -f2 | tr -d ' "')
+    if [[ -n "$last_switch" && "$last_switch" != "null" ]]; then
       echo "  Last switch: $last_switch"
     else
       echo "  Last switch: Never"
     fi
-  fi
-
-  echo
-  log_info "Managed dotfiles:"
-  if [[ -d "$DOTFILES_DIR" ]]; then
-    local dotfile_count=$(find "$DOTFILES_DIR" -type f | wc -l)
-    if [[ $dotfile_count -gt 0 ]]; then
-      find "$DOTFILES_DIR" -type f | sed "s|$DOTFILES_DIR/|  |" | sort
-      echo "  Total: $dotfile_count dotfiles"
-    else
-      echo "  No dotfiles"
-    fi
-  else
-    echo "  No dotfiles directory"
-  fi
-
-  echo
-  log_info "Managed packages:"
-  if [[ -f "$PACKAGES_FILE" ]]; then
+    
+    echo
+    log_info "Packages:"
     local package_count=0
-    while IFS= read -r line; do
-      # Skip empty lines and comments
-      [[ -z "$line" || "$line" == \#* ]] && continue
+    while IFS='=' read -r entry; do
+      local section="${entry%%:*}"
+      local key_value="${entry#*:}"
+      local package="${key_value%%=*}"
+      local enabled="${key_value##*=}"
       
-      # Remove whitespace and count as package
-      local package="${line// /}"  # Remove whitespace
-      if [[ -n "$package" ]]; then
+      if [[ "$section" == "packages" && "$enabled" == "true" ]]; then
         echo "  $package"
         ((package_count++))
       fi
-    done <"$PACKAGES_FILE"
+    done < <(parse_toml)
     
     if [[ $package_count -eq 0 ]]; then
-      echo "  No packages"
+      echo "  No packages configured"
     else
       echo "  Total: $package_count packages"
     fi
+    
+    echo
+    log_info "Dotfiles:"
+    local dotfile_count=0
+    while IFS='=' read -r entry; do
+      local section="${entry%%:*}"
+      local key_value="${entry#*:}"
+      local target="${key_value%%=*}"
+      local source="${key_value##*=}"
+      
+      if [[ "$section" == "dotfiles" ]]; then
+        echo "  $target -> $source"
+        ((dotfile_count++))
+      fi
+    done < <(parse_toml)
+    
+    if [[ $dotfile_count -eq 0 ]]; then
+      echo "  No dotfiles configured"
+    else
+      echo "  Total: $dotfile_count dotfiles"
+    fi
   else
-    echo "  No packages file"
+    echo "  No configuration file found"
   fi
-}
-
-# Show status
-status() {
-  list_managed
 }
 
 # Show help
@@ -442,33 +278,27 @@ show_help() {
      forge <COMMAND>
 
  COMMANDS:
-     init            Initialize configuration structure
-     switch          Apply configuration (install packages, deploy dotfiles, cleanup old packages)
-     build           Alias for switch
-     add <file>      Add a file to dotfiles management
-     remove <path>   Remove a dotfile from management
-     list            List all managed files and packages with status
-     status          Show current status
+     init            Initialize configuration structure (creates forge.toml)
+     switch          Apply configuration (install packages, deploy dotfiles)
+     status          Show current configuration status
      help            Show this help message
 
  FEATURES:
-      - Automatic package cleanup: When you remove a package from packages.toml and run switch,
-        the package will be automatically uninstalled from your system.
-      - Package state tracking: Previously installed packages are tracked to enable cleanup.
-      - Simple format: Packages are managed in simple format (no version tags required).
-      - Random Linux-inspired names: Each list command generates a unique forge name.
+     - TOML-based configuration in forge.toml
+     - Package management via dnf
+     - Dotfile management via symlinks
+     - Automatic backup of existing files
+     - User-level configuration like home-manager/nixos
 
-  FILES:
-      $FORGE_DIR/              Main configuration directory
-      $DOTFILES_DIR/           Dotfiles to deploy
-      $PACKAGES_FILE           Simple file with packages to install (one package per line)
-      $STATE_FILE              State tracking file for managed packages and files
+ FILES:
+     $FORGE_DIR/              Main configuration directory
+     $FORGE_TOML              Configuration file for packages and dotfiles
 
  EXAMPLES:
      forge init
-     forge add ~/.bashrc
+     # Edit $FORGE_TOML to add packages and dotfiles
      forge switch
-     forge list
+     forge status
 
 EOF
 }
@@ -481,26 +311,6 @@ main() {
     ;;
   "switch")
     switch
-    ;;
-  "build")
-    build
-    ;;
-  "add")
-    if [[ -z "${2:-}" ]]; then
-      log_error "Please specify a file to add"
-      exit 1
-    fi
-    add_dotfile "$2"
-    ;;
-  "remove")
-    if [[ -z "${2:-}" ]]; then
-      log_error "Please specify a path to remove"
-      exit 1
-    fi
-    remove_dotfile "$2"
-    ;;
-  "list")
-    list_managed
     ;;
   "status")
     status
@@ -522,4 +332,3 @@ main() {
 
 # Run main function with all arguments
 main "$@"
-
