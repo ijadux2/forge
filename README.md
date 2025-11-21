@@ -1,10 +1,11 @@
 # Forge - A Home-Manager Like Tool for Fedora
 
-A lightweight configuration management tool for Fedora that provides dotfile management and package installation functionality through a centralized TOML configuration.
+A lightweight configuration management tool for Fedora that provides COPR repository management, dotfile management and package installation functionality through a centralized TOML configuration.
 
 ## Overview
 
 Forge is a bash script that helps you manage your Fedora system configuration by:
+- Managing COPR repositories (enable/disable automatically)
 - Installing and managing system packages via dnf
 - Managing dotfiles through symlinks to actual files
 - Centralized configuration via a single `forge.toml` file
@@ -53,17 +54,19 @@ Creates:
 - `~/.config/forge/forge.toml` - Central configuration file
 
 ### `switch`
-Apply the current configuration (install packages, deploy dotfiles).
+Apply the current configuration (enable COPR, install packages, deploy dotfiles).
 
 ```bash
 ./forge switch
 ```
 
 This command:
-1. Installs all packages listed in `forge.toml`
-2. Creates symlinks for all configured dotfiles
-3. Creates backups of existing files before replacing them
-4. Updates the last switch timestamp
+1. Enables all COPR repositories listed in `forge.toml`
+2. Disables COPR repositories that are no longer configured
+3. Installs all packages listed in `forge.toml`
+4. Creates symlinks for all configured dotfiles
+5. Creates backups of existing files before replacing them
+6. Updates the last switch timestamp
 
 ### `status`
 Show current configuration status and information.
@@ -75,7 +78,7 @@ Show current configuration status and information.
 Displays:
 - Configuration directory paths
 - Last switch timestamp
-- List of configured packages and dotfiles
+- List of configured COPR repositories, packages and dotfiles
 
 ### `help`
 Show help message with all available commands.
@@ -96,6 +99,12 @@ The central configuration file located at `~/.config/forge/forge.toml`:
 [forge]
 version = "1.0"
 last_switch = null
+
+[copr]
+# COPR repositories to enable
+# Just list COPR repository names - presence means enable, absence means don't enable
+copr.fedorainfracloud.org/username/repository
+copr.fedorainfracloud.org/anotheruser/anotherrepo
 
 [packages]
 # List of packages to install using dnf
@@ -125,6 +134,18 @@ backup_dir = "backup"
 #### `[forge]`
 - `version`: Configuration file version
 - `last_switch`: Timestamp of last switch operation (auto-updated)
+
+#### `[copr]`
+List of COPR repositories to enable via `dnf copr enable`. **Just list COPR repository names** - presence means enable, absence means don't enable.
+
+**Examples:**
+```toml
+[copr]
+copr.fedorainfracloud.org/username/repository
+copr.fedorainfracloud.org/anotheruser/anotherrepo
+```
+
+To remove a COPR repository, simply delete the line containing the repository name. Forge will automatically disable it during the next switch.
 
 #### `[packages]`
 List of packages to install via dnf. **Just list package names** - presence means install, absence means don't install.
@@ -168,6 +189,13 @@ Additional configuration options:
 
 ## How It Works
 
+### COPR Repository Management
+COPR repositories are managed through the `[copr]` section in `forge.toml`:
+- **Add COPR repo**: Simply add the repository name on a new line
+- **Remove COPR repo**: Delete the line containing the repository name
+- **Automatic cleanup**: Forge automatically disables COPR repos that are removed from configuration
+- **No flags needed**: Just presence/absence of the repository name matters
+
 ### Package Management
 Packages are managed through the `[packages]` section in `forge.toml`:
 - **Add package**: Simply add the package name on a new line
@@ -195,8 +223,11 @@ Before creating symlinks, Forge:
 # Initialize forge
 ./forge init
 
-# Edit forge.toml to add packages
+# Edit forge.toml to add COPR repos and packages
 nano ~/.config/forge/forge.toml
+
+# Add to [copr] section:
+copr.fedorainfracloud.org/username/cool-repo
 
 # Add to [packages] section:
 git
@@ -228,6 +259,17 @@ nano ~/.config/forge/forge.toml
 
 # Apply changes
 ./forge switch
+```
+
+### COPR Repository Management Examples
+```toml
+[copr]
+# Development tools COPR
+copr.fedorainfracloud.org/development/tools
+copr.fedorainfracloud.org/user/neovim-nightly
+
+# To remove a COPR repo, just delete the line
+# Forge will automatically disable it during the next switch
 ```
 
 ### Package Management Examples
@@ -269,6 +311,7 @@ git commit -m "Updated vim configuration"
 ## Dependencies
 
 - `dnf` - Fedora package manager
+- `dnf-plugins-core` - For COPR repository management
 - `sed` - For updating configuration file (usually pre-installed)
 
 ## Migration from Previous Version

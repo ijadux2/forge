@@ -50,6 +50,13 @@ init() {
 version = "1.0"
 last_switch = null
 
+[copr]
+# COPR repositories to enable
+# Just list COPR repository names - presence means enable, absence means don't enable
+# Examples:
+# copr.fedorainfracloud.org/username/repository
+# copr.fedorainfracloud.org/anotheruser/anotherrepo
+
 [packages]
 # List of packages to install using dnf
 # Just list package names - presence means install, absence means don't install
@@ -102,8 +109,69 @@ parse_toml() {
     elif [[ "$section" == "packages" && "$line" =~ ^([^=]+)$ ]]; then
       local package="${BASH_REMATCH[1]// /}"
       echo "$section:$package"
+    # Parse COPR repository names (just keys without values in copr section)
+    elif [[ "$section" == "copr" && "$line" =~ ^([^=]+)$ ]]; then
+      local copr_repo="${BASH_REMATCH[1]// /}"
+      echo "$section:$copr_repo"
     fi
   done <"$FORGE_TOML"
+}
+
+# Enable COPR repositories from forge.toml
+enable_copr_repos() {
+  log_info "Enabling COPR repositories..."
+  
+  local copr_enabled=false
+  
+  while IFS='=' read -r entry; do
+    local section="${entry%%:*}"
+    local copr_repo="${entry#*:}"
+    
+    if [[ "$section" == "copr" && -n "$copr_repo" ]]; then
+      copr_enabled=true
+      log_info "Enabling COPR repository: $copr_repo"
+      if sudo dnf copr enable -y "$copr_repo"; then
+        log_success "Enabled COPR: $copr_repo"
+      else
+        log_error "Failed to enable COPR: $copr_repo"
+      fi
+    fi
+  done < <(parse_toml)
+  
+  if [[ "$copr_enabled" == false ]]; then
+    log_info "No COPR repositories to enable"
+  fi
+}
+
+# Disable COPR repositories that are no longer in forge.toml
+disable_copr_repos() {
+  log_info "Checking for COPR repositories to disable..."
+  
+  # Get currently enabled COPR repos
+  local enabled_repos=$(sudo dnf copr list --enabled 2>/dev/null | grep -E "copr\.fedorainfracloud\.org" | awk '{print $1}' || true)
+  
+  # Get configured COPR repos from forge.toml
+  local configured_repos=""
+  while IFS='=' read -r entry; do
+    local section="${entry%%:*}"
+    local copr_repo="${entry#*:}"
+    
+    if [[ "$section" == "copr" && -n "$copr_repo" ]]; then
+      configured_repos="$configured_repos $copr_repo"
+    fi
+  done < <(parse_toml)
+  
+  # Disable repos that are enabled but not configured
+  for repo in $enabled_repos; do
+    if [[ ! " $configured_repos " =~ " $repo " ]]; then
+      log_info "Disabling COPR repository: $repo"
+      if sudo dnf copr disable -y "$repo"; then
+        log_success "Disabled COPR: $repo"
+      else
+        log_error "Failed to disable COPR: $repo"
+      fi
+    fi
+  done
 }
 
 # Install packages from forge.toml
@@ -194,6 +262,12 @@ switch() {
     exit 1
   fi
   
+  # Enable COPR repositories
+  enable_copr_repos
+  
+  # Disable COPR repositories that are no longer configured
+  disable_copr_repos
+  
   # Install packages
   install_packages
   
@@ -224,6 +298,25 @@ status() {
       echo "  Last switch: $last_switch"
     else
       echo "  Last switch: Never"
+    fi
+    
+    echo
+    log_info "COPR Repositories:"
+    local copr_count=0
+    while IFS='=' read -r entry; do
+      local section="${entry%%:*}"
+      local copr_repo="${entry#*:}"
+      
+      if [[ "$section" == "copr" && -n "$copr_repo" ]]; then
+        echo "  $copr_repo"
+        ((copr_count++))
+      fi
+    done < <(parse_toml)
+    
+    if [[ $copr_count -eq 0 ]]; then
+      echo "  No COPR repositories configured"
+    else
+      echo "  Total: $copr_count COPR repositories"
     fi
     
     echo
@@ -279,27 +372,28 @@ show_help() {
      forge <COMMAND>
 
  COMMANDS:
-     init            Initialize configuration structure (creates forge.toml)
-     switch          Apply configuration (install packages, deploy dotfiles)
-     status          Show current configuration status
-     help            Show this help message
+      init            Initialize configuration structure (creates forge.toml)
+      switch          Apply configuration (enable COPR, install packages, deploy dotfiles)
+      status          Show current configuration status
+      help            Show this help message
 
  FEATURES:
-     - TOML-based configuration in forge.toml
-     - Package management via dnf
-     - Dotfile management via symlinks
-     - Automatic backup of existing files
-     - User-level configuration like home-manager/nixos
+      - TOML-based configuration in forge.toml
+      - COPR repository management (enable/disable automatically)
+      - Package management via dnf
+      - Dotfile management via symlinks
+      - Automatic backup of existing files
+      - User-level configuration like home-manager/nixos
 
  FILES:
-     $FORGE_DIR/              Main configuration directory
-     $FORGE_TOML              Configuration file for packages and dotfiles
+      $FORGE_DIR/              Main configuration directory
+      $FORGE_TOML              Configuration file for COPR, packages and dotfiles
 
  EXAMPLES:
-     forge init
-     # Edit $FORGE_TOML to add packages and dotfiles
-     forge switch
-     forge status
+      forge init
+      # Edit $FORGE_TOML to add COPR repos, packages and dotfiles
+      forge switch
+      forge status
 
 EOF
 }
