@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# fedora-home-manager - A home-manager like script for Fedora
+# forge - A home-manager like script for Fedora
 # Provides dotfile management and package installation functionality
 
 set -euo pipefail
 
 # Configuration
-HOME_MANAGER_DIR="${HOME_MANAGER_DIR:-$HOME/.config/fedora-home-manager}"
-DOTFILES_DIR="$HOME_MANAGER_DIR/dotfiles"
-PACKAGES_FILE="$HOME_MANAGER_DIR/packages.toml"
-STATE_FILE="$HOME_MANAGER_DIR/state.json"
-BACKUP_DIR="$HOME_MANAGER_DIR/backup"
+FORGE_DIR="${FORGE_DIR:-$HOME/.config/forge}"
+DOTFILES_DIR="$FORGE_DIR/dotfiles"
+PACKAGES_FILE="$FORGE_DIR/packages.toml"
+STATE_FILE="$FORGE_DIR/state.json"
+BACKUP_DIR="$FORGE_DIR/backup"
 
 # Colors
 RED='\033[0;31m'
@@ -38,10 +38,10 @@ log_error() {
 
 # Initialize command - set up the configuration structure
 init() {
-  log_info "Initializing fedora-home-manager..."
+  log_info "Initializing forge..."
   
   # Create directories
-  mkdir -p "$HOME_MANAGER_DIR"
+  mkdir -p "$FORGE_DIR"
   mkdir -p "$DOTFILES_DIR"
   mkdir -p "$BACKUP_DIR"
 
@@ -51,21 +51,20 @@ init() {
     log_success "Created state file: $STATE_FILE"
   fi
 
-  # Create initial packages file with TOML format if it doesn't exist
+  # Create initial packages file with simplified format if it doesn't exist
   if [[ ! -f "$PACKAGES_FILE" ]]; then
     cat >"$PACKAGES_FILE" <<'EOF'
-# Fedora packages configuration
-# TOML format for better package management
+# Forge packages configuration
+# Simple format: just list package names, one per line
 
-[packages]
 # Core development tools
-# git = "latest"
-# vim = "latest"
-# curl = "latest"
-# wget = "latest"
+# git
+# vim
+# curl
+# wget
 
-# Additional packages can be added with version specifications
-# Example: package_name = "version" or "latest"
+# Additional packages can be added as simple package names
+# Example: package_name
 EOF
     log_success "Created packages file: $PACKAGES_FILE"
   fi
@@ -78,12 +77,12 @@ EOF
 
   log_success "Initialization complete!"
   log_info "Add packages to $PACKAGES_FILE and dotfiles to $DOTFILES_DIR/"
-  log_info "Run 'fedora-home-manager switch' to apply your configuration"
+  log_info "Run 'forge switch' to apply your configuration"
 }
 
 # Initialize directories
 init_dirs() {
-  mkdir -p "$HOME_MANAGER_DIR"
+  mkdir -p "$FORGE_DIR"
   mkdir -p "$DOTFILES_DIR"
   mkdir -p "$BACKUP_DIR"
 
@@ -135,14 +134,14 @@ install_packages() {
 
   local current_packages=()
   
-  # Parse TOML and extract package names
+  # Parse simple format and extract package names
   while IFS= read -r line; do
-    # Skip empty lines, comments, and section headers
-    [[ -z "$line" || "$line" == \#* || "$line" == \[* ]] && continue
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" == \#* ]] && continue
     
-    # Extract package name (before =)
-    if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*= ]]; then
-      local package="${BASH_REMATCH[1]// /}"  # Remove whitespace
+    # Remove whitespace and use as package name
+    local package="${line// /}"  # Remove whitespace
+    if [[ -n "$package" ]]; then
       current_packages+=("$package")
       
       log_info "Installing package: $package"
@@ -166,12 +165,12 @@ cleanup_packages() {
   local current_packages=()
   if [[ -f "$PACKAGES_FILE" ]]; then
     while IFS= read -r line; do
-      # Skip empty lines, comments, and section headers
-      [[ -z "$line" || "$line" == \#* || "$line" == \[* ]] && continue
+      # Skip empty lines and comments
+      [[ -z "$line" || "$line" == \#* ]] && continue
       
-      # Extract package name (before =)
-      if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*= ]]; then
-        local package="${BASH_REMATCH[1]// /}"  # Remove whitespace
+      # Remove whitespace and use as package name
+      local package="${line// /}"  # Remove whitespace
+      if [[ -n "$package" ]]; then
         current_packages+=("$package")
       fi
     done <"$PACKAGES_FILE"
@@ -282,7 +281,7 @@ get_installed_packages() {
 
 # Switch command - main deployment function
 switch() {
-  log_info "Starting fedora-home-manager switch..."
+  log_info "Starting forge switch..."
 
   # Initialize directories
   init_dirs
@@ -358,47 +357,25 @@ remove_dotfile() {
   fi
 }
 
-# List managed files
-list_managed() {
-  log_info "Managed dotfiles:"
-  if [[ -d "$DOTFILES_DIR" ]]; then
-    find "$DOTFILES_DIR" -type f | sed "s|$DOTFILES_DIR/|  |" | sort
-  fi
-
-  log_info "Managed packages:"
-  if [[ -f "$PACKAGES_FILE" ]]; then
-    while IFS= read -r line; do
-      # Skip empty lines, comments, and section headers
-      [[ -z "$line" || "$line" == \#* || "$line" == \[* ]] && continue
-      
-      # Extract package name (before =)
-      if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*= ]]; then
-        local package="${BASH_REMATCH[1]// /}"  # Remove whitespace
-        echo "  $package"
-      fi
-    done <"$PACKAGES_FILE"
-    
-    # Check if any packages were found
-    local package_count=0
-    while IFS= read -r line; do
-      [[ -z "$line" || "$line" == \#* || "$line" == \[* ]] && continue
-      if [[ "$line" =~ ^[[:space:]]*([^=]+)[[:space:]]*= ]]; then
-        ((package_count++))
-      fi
-    done <"$PACKAGES_FILE"
-    
-    if [[ $package_count -eq 0 ]]; then
-      log_info "  No packages"
-    fi
-  else
-    log_info "  No packages"
-  fi
+# Generate random Linux-inspired name
+generate_forge_name() {
+  local adjectives=("swift" "bold" "noble" "fierce" "wise" "ancient" "crystal" "iron" "steel" "shadow" "light" "dark" "golden" "silver" "bronze" "cosmic" "quantum" "neural" "atomic" "stellar")
+  local nouns=("eagle" "wolf" "lion" "tiger" "dragon" "phoenix" "hawk" "falcon" "bear" "panther" "lynx" "owl" "raven" "cobra" "viper" "python" "jaguar" "leopard" "cheetah" "cougar")
+  local suffix=("linux" "kernel" "system" "forge" "core" "engine" "matrix" "network" "protocol" "framework" "platform" "architecture" "interface" "module" "library" "runtime" "daemon" "service" "process" "thread")
+  
+  local adj=${adjectives[$RANDOM % ${#adjectives[@]}]}
+  local noun=${nouns[$RANDOM % ${#nouns[@]}]}
+  local suff=${suffix[$RANDOM % ${#suffix[@]}]}
+  
+  echo "${adj}-${noun}-${suff}"
 }
 
-# Show status
-status() {
-  log_info "Fedora Home Manager Status:"
-  echo "  Config directory: $HOME_MANAGER_DIR"
+# List managed files with status
+list_managed() {
+  local forge_name=$(generate_forge_name)
+  
+  log_info "Forge Status: $forge_name"
+  echo "  Config directory: $FORGE_DIR"
   echo "  Dotfiles directory: $DOTFILES_DIR"
   echo "  Packages file: $PACKAGES_FILE"
 
@@ -412,16 +389,57 @@ status() {
   fi
 
   echo
+  log_info "Managed dotfiles:"
+  if [[ -d "$DOTFILES_DIR" ]]; then
+    local dotfile_count=$(find "$DOTFILES_DIR" -type f | wc -l)
+    if [[ $dotfile_count -gt 0 ]]; then
+      find "$DOTFILES_DIR" -type f | sed "s|$DOTFILES_DIR/|  |" | sort
+      echo "  Total: $dotfile_count dotfiles"
+    else
+      echo "  No dotfiles"
+    fi
+  else
+    echo "  No dotfiles directory"
+  fi
+
+  echo
+  log_info "Managed packages:"
+  if [[ -f "$PACKAGES_FILE" ]]; then
+    local package_count=0
+    while IFS= read -r line; do
+      # Skip empty lines and comments
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      
+      # Remove whitespace and count as package
+      local package="${line// /}"  # Remove whitespace
+      if [[ -n "$package" ]]; then
+        echo "  $package"
+        ((package_count++))
+      fi
+    done <"$PACKAGES_FILE"
+    
+    if [[ $package_count -eq 0 ]]; then
+      echo "  No packages"
+    else
+      echo "  Total: $package_count packages"
+    fi
+  else
+    echo "  No packages file"
+  fi
+}
+
+# Show status
+status() {
   list_managed
 }
 
 # Show help
 show_help() {
   cat <<EOF
- fedora-home-manager - A home-manager like script for Fedora
+  forge - A home-manager like script for Fedora
 
  USAGE:
-     fedora-home-manager <COMMAND>
+     forge <COMMAND>
 
  COMMANDS:
      init            Initialize configuration structure
@@ -429,7 +447,7 @@ show_help() {
      build           Alias for switch
      add <file>      Add a file to dotfiles management
      remove <path>   Remove a dotfile from management
-     list            List all managed files and packages
+     list            List all managed files and packages with status
      status          Show current status
      help            Show this help message
 
@@ -437,19 +455,20 @@ show_help() {
       - Automatic package cleanup: When you remove a package from packages.toml and run switch,
         the package will be automatically uninstalled from your system.
       - Package state tracking: Previously installed packages are tracked to enable cleanup.
-      - TOML format: Packages are managed in TOML format for better organization and version support.
+      - Simple format: Packages are managed in simple format (no version tags required).
+      - Random Linux-inspired names: Each list command generates a unique forge name.
 
   FILES:
-      $HOME_MANAGER_DIR/          Main configuration directory
-      $DOTFILES_DIR/              Dotfiles to deploy
-      $PACKAGES_FILE              TOML file with packages to install (supports version specifications)
-      $STATE_FILE                 State tracking file for managed packages and files
+      $FORGE_DIR/              Main configuration directory
+      $DOTFILES_DIR/           Dotfiles to deploy
+      $PACKAGES_FILE           Simple file with packages to install (one package per line)
+      $STATE_FILE              State tracking file for managed packages and files
 
  EXAMPLES:
-     fedora-home-manager init
-     fedora-home-manager add ~/.bashrc
-     fedora-home-manager switch
-     fedora-home-manager list
+     forge init
+     forge add ~/.bashrc
+     forge switch
+     forge list
 
 EOF
 }
