@@ -102,8 +102,21 @@ parse_toml() {
     
     # Parse key-value pairs for non-packages sections
     if [[ "$section" != "packages" && "$line" =~ ^([^=]+)=(.+)$ ]]; then
-      local key="${BASH_REMATCH[1]// /}"
-      local value="${BASH_REMATCH[2]// /}"
+      local key="${BASH_REMATCH[1]}"
+      local value="${BASH_REMATCH[2]}"
+      
+      # Trim leading/trailing whitespace from key and value
+      key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+      
+      # Remove quotes from quoted strings
+      if [[ "$key" =~ ^\"(.*)\"$ ]]; then
+        key="${BASH_REMATCH[1]}"
+      fi
+      if [[ "$value" =~ ^\"(.*)\"$ ]]; then
+        value="${BASH_REMATCH[1]}"
+      fi
+      
       echo "$section:$key=$value"
     # Parse package names (just keys without values in packages section)
     elif [[ "$section" == "packages" && "$line" =~ ^([^=]+)$ ]]; then
